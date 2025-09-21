@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>炸弹猫 - 创建/加入房间</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 2rem; background:#111; color:#eee; }
+    input, select, button { margin: .25rem 0; padding:.5rem; }
+    .card { background:#222; padding:1rem; border-radius:8px; max-width:420px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>炸弹猫 (Prototype)</h1>
+    <label>昵称 <br><input id="nickname" maxlength="20" value="玩家"/></label><br>
+    <label>头像URL (可选)<br><input id="avatar" placeholder="https://..."/></label><br>
+    <fieldset style="border:1px solid #444; padding:.5rem;">
+      <legend>选项</legend>
+      <label><input type="checkbox" id="useExpansion"/> 启用扩展</label><br>
+      <label><input type="checkbox" id="includeImploding"/> 包含黑洞(Imploding)</label>
+    </fieldset>
+    <button id="createBtn">创建房间</button>
+    <hr>
+    <label>房间ID <br><input id="joinRoomId" placeholder="房间号"/></label><br>
+    <button id="joinBtn">加入房间</button>
+  </div>
+  <script type="module">
+    const nicknameInput = document.getElementById('nickname');
+    const avatarInput = document.getElementById('avatar');
+    const useExpansion = document.getElementById('useExpansion');
+    const includeImploding = document.getElementById('includeImploding');
+
+    const pidKey = 'bomb_player_id';
+    let playerId = localStorage.getItem(pidKey);
+    if (!playerId) { playerId = crypto.randomUUID(); localStorage.setItem(pidKey, playerId); }
+
+    function goLobby(roomId){
+      window.location.href = `/lobby.html?room=${roomId}`;
+    }
+
+    document.getElementById('createBtn').onclick = async () => {
+      const options = { playerCount: 8, useExpansion: useExpansion.checked, includeImploding: includeImploding.checked };
+      const payload = { playerId, name: nicknameInput.value.trim() || '玩家', avatar: avatarInput.value || undefined, options };
+      const r = await fetch('/api/createRoom', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)}).then(r=>r.json());
+      if (r.ok) goLobby(r.roomId); else alert(r.error || '创建失败');
+    };
+
+    document.getElementById('joinBtn').onclick = async () => {
+      const roomId = (document.getElementById('joinRoomId')).value.trim();
+      if (!roomId) return;
+      goLobby(roomId);
+    };
+  </script>
+</body>
+</html>
+

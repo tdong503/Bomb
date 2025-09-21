@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>游戏 - 炸弹猫</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin:.75rem; background:#0e1114; color:#f5f6f7; }
+    #players { display:flex; gap:.5rem; flex-wrap:wrap; }
+    .player { background:#1c252f; padding:.5rem .75rem; border-radius:6px; min-width:120px; position:relative; }
+    .current { outline: 2px solid #ffb347; }
+    .dead { filter: grayscale(1); opacity:.5; }
+    #hand { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.5rem; }
+    .card { background:#24313d; padding:.5rem .6rem; border-radius:6px; cursor:pointer; font-size:.8rem; min-width:80px; }
+    .card:hover { background:#314252; }
+    #log { background:#111a22; padding:.5rem; height:140px; overflow:auto; font-size:.75rem; }
+    button { cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h2>炸弹猫</h2>
+  <div>
+    房间: <span id="roomId"></span> | 你: <span id="me"></span> | <button id="leaveBtn">返回大厅</button>
+  </div>
+  <h3>玩家</h3>
+  <div id="players"></div>
+  <h3>你的手牌</h3>
+  <div id="hand"></div>
+  <div style="margin-top:.5rem;">
+    <button id="drawBtn">摸牌</button>
+  </div>
+  <h3>日志</h3>
+  <div id="log"></div>
+  <script type="module" src="/client.js"></script>
+  <script type="module">
+    import { socket, getPlayerId, ensureName, stateBus } from './client.js';
+    const url = new URL(location.href);
+    const roomId = url.searchParams.get('room');
+    document.getElementById('roomId').textContent = roomId;
+    const playerId = getPlayerId();
+    document.getElementById('me').textContent = ensureName();
+
+    function log(msg){ const el = document.getElementById('log'); el.innerHTML += `<div>${new Date().toLocaleTimeString()} ${msg}</div>`; el.scrollTop = el.scrollHeight; }
+
+    socket.emit('joinRoom', { roomId, playerId, name: ensureName() }, ack => { if(!ack?.ok) log('重新连接失败'); });
+
+    document.getElementById('leaveBtn').onclick = () => { location.href=`/lobby.html?room=${roomId}`; };
+    document.getElementById('drawBtn').onclick = () => {
+      socket.emit('draw', { roomId, playerId }, ack => { if(!ack?.ok) log('摸牌失败'); else log('摸牌'); });
+    };
+
+    let lastState;
+    stateBus.on('gameState', st => {
+      lastState = st;
+      render(st);
+    });
+
+    function render(st){
+      const psWrap = document.getElementById('players');
+      psWrap.innerHTML='';
+      st.players.forEach((p,i)=>{
+        const div = document.createElement('div');
+        div.className='player'+(i===st.currentPlayerIndex?' current':'')+(p.alive?'':' dead');
+        div.innerHTML = `<strong>${p.name}</strong><br>牌:${p.hand.length}<br>${p.alive?'存活':'出局'}`;
+        psWrap.appendChild(div);
+      });
+      const me = st.players.find(p=>p.id===playerId);
+      const handEl = document.getElementById('hand');
+      handEl.innerHTML='';
+      if (me){
+        me.hand.forEach(c => {
+          const div = document.createElement('div');
+          div.className='card';
+            div.textContent = c.type + (c.name?'\n'+c.name:'');
+            div.onclick = () => {
+              socket.emit('playCard', { roomId, playerId, cardId: c.id }, ack=>{ if(!ack.ok) log('出牌失败:'+ (ack.message||'')); else log('出牌 '+c.type); });
+            };
+          handEl.appendChild(div);
+        });
+      }
+    }
+  </script>
+</body>
+</html>
