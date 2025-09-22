@@ -75,24 +75,23 @@ function buildBaseCards(playerCount: number, options: GameOptions): Card[] {
   return cards;
 }
 
-export function shuffle<T>(arr: T[]): T[] {
+export function shuffle<T>(arr: T[], rand: () => number = Math.random): T[] {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(rand() * (i + 1));
     [arr[i], arr[j]] = [arr[j], arr[i]];
   }
   return arr;
 }
 
-export function buildInitialDeck(options: GameOptions): Card[] {
-  return shuffle(buildBaseCards(options.playerCount, options));
+export function buildInitialDeck(options: GameOptions, rand: () => number = Math.random): Card[] {
+  return shuffle(buildBaseCards(options.playerCount, options), rand);
 }
 
-export function setupDeckAfterDealing(players: number, options: GameOptions, drawPile: Card[]): Card[] {
+export function setupDeckAfterDealing(players: number, options: GameOptions, drawPile: Card[], rand: () => number = Math.random): Card[] {
   // Add bombs and remaining defuse into the draw pile and reshuffle lightly (spread random insertion)
   const bombsToAdd = players - 1; // per rules
   for (let i = 0; i < bombsToAdd; i++) {
-    // random position insertion
-    const idx = Math.floor(Math.random() * (drawPile.length + 1));
+    const idx = Math.floor(rand() * (drawPile.length + 1));
     drawPile.splice(idx, 0, createCard(CardType.BOMB));
   }
   // Remaining defuse: total defuse count = players + 2
@@ -100,9 +99,8 @@ export function setupDeckAfterDealing(players: number, options: GameOptions, dra
   const alreadyDealtDefuse = players; // each player got exactly one
   const remaining = totalDefuse - alreadyDealtDefuse;
   for (let i = 0; i < remaining; i++) {
-    const idx = Math.floor(Math.random() * (drawPile.length + 1));
+    const idx = Math.floor(rand() * (drawPile.length + 1));
     drawPile.splice(idx, 0, createCard(CardType.DEFUSE));
   }
   return drawPile;
 }
-

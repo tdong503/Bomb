@@ -16,6 +16,10 @@ export interface RoomState {
   game: GameEngine;
   players: RoomPlayerMeta[]; // mapping to engine players
   options: GameOptions;
+  pendingTimer?: NodeJS.Timeout; // for NOPE resolution
+  favorTimer?: NodeJS.Timeout; // for favor selection timeout
+  pendingNopeExpireAt?: number;
+  pendingFavorExpireAt?: number;
 }
 
 export class RoomManager {

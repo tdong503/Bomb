@@ -10,10 +10,15 @@
     .current { outline: 2px solid #ffb347; }
     .dead { filter: grayscale(1); opacity:.5; }
     #hand { display:flex; gap:.5rem; flex-wrap:wrap; margin-top:.5rem; }
-    .card { background:#24313d; padding:.5rem .6rem; border-radius:6px; cursor:pointer; font-size:.8rem; min-width:80px; }
+    .card { background:#24313d; padding:.5rem .6rem; border-radius:6px; cursor:pointer; font-size:.8rem; min-width:80px; white-space:pre-line; }
     .card:hover { background:#314252; }
     #log { background:#111a22; padding:.5rem; height:140px; overflow:auto; font-size:.75rem; }
     button { cursor:pointer; }
+    #favorBar { display:none; margin-top:.5rem; background:#1f2f3a; padding:.5rem; border-radius:6px; font-size:.8rem; }
+    #favorCards { display:flex; gap:.4rem; flex-wrap:wrap; margin-top:.4rem; }
+    .pickable { outline:2px solid #4caf50; }
+    #pendingBar { font-size:.8rem; }
+    #nopeLog { font-size:.65rem; margin-top:.25rem; opacity:.8; }
   </style>
 </head>
 <body>
@@ -25,8 +30,25 @@
   <div id="players"></div>
   <h3>你的手牌</h3>
   <div id="hand"></div>
+  <div id="comboBar" style="margin-top:.5rem; display:none;">
+    <span id="comboInfo"></span>
+    <button id="playComboBtn">出组合牌</button>
+    <button id="clearComboBtn">清除选择</button>
+    <div id="comboExtra" style="margin-top:.25rem; font-size:.75rem; line-height:1.2;">根据组合类型提示将显示这里</div>
+  </div>
   <div style="margin-top:.5rem;">
     <button id="drawBtn">摸牌</button>
+  </div>
+  <div id="pendingBar" style="display:none; margin-top:.5rem; background:#351f1f; padding:.5rem; border-radius:6px;">
+    <span id="pendingText"></span>
+    <button id="playNopeBtn" style="margin-left:.5rem; display:none;">打出 NOPE</button>
+    <button id="forceResolveBtn" style="margin-left:.5rem;">立即结算(测试)</button>
+    <div id="nopeLog"></div>
+  </div>
+  <div id="favorBar">
+    <div id="favorStatus"></div>
+    <div id="favorCountdown" style="margin-top:.25rem;"></div>
+    <div id="favorCards"></div>
   </div>
   <h3>日志</h3>
   <div id="log"></div>
@@ -49,12 +71,164 @@
     };
 
     let lastState;
+    let selected = new Set();
+
+    const comboBar = document.getElementById('comboBar');
+    const comboInfo = document.getElementById('comboInfo');
+    const comboExtra = document.getElementById('comboExtra');
+    const playComboBtn = document.getElementById('playComboBtn');
+    const clearComboBtn = document.getElementById('clearComboBtn');
+    const pendingBar = document.getElementById('pendingBar');
+    const pendingText = document.getElementById('pendingText');
+    const playNopeBtn = document.getElementById('playNopeBtn');
+    const forceResolveBtn = document.getElementById('forceResolveBtn');
+    const nopeLogEl = document.getElementById('nopeLog');
+    const favorBar = document.getElementById('favorBar');
+    const favorStatus = document.getElementById('favorStatus');
+    const favorCountdown = document.getElementById('favorCountdown');
+    const favorCards = document.getElementById('favorCards');
+    let countdownTimer; let remainingMs=0;
+    let favorTimer; let favorMs=0;
+
+    clearComboBtn.onclick = () => { selected.clear(); updateComboBar(); render(lastState); };
+
+    playComboBtn.onclick = () => {
+      if (!lastState) return;
+      const me = lastState.players.find(p=>p.id===playerId);
+      if (!me) return;
+      const cardIds = Array.from(selected);
+      if (cardIds.length < 2) { log('组合牌至少2张'); return; }
+      const cards = me.hand.filter(c=>cardIds.includes(c.id));
+      const normals = cards.every(c=>c.type==='NORMAL');
+      if (!normals){ log('仅普通猫牌可组合'); return; }
+      const nameCounts = {}; cards.forEach(c=>{ nameCounts[c.name]= (nameCounts[c.name]||0)+1; });
+      const unique = Object.keys(nameCounts).length; const size = cards.length;
+      let comboType;
+      if (size===2 && unique===1) comboType='TWO';
+      else if (size===3 && unique===1) comboType='THREE';
+      else if (size===4 && unique===1) comboType='FOUR';
+      else if (size===5 && unique===5) comboType='FIVE_DISTINCT';
+      if (!comboType){ log('结构不符合组合要求'); return; }
+      const params = {};
+      if (comboType==='THREE') {
+        const others = lastState.players.filter(p=>p.id!==playerId && p.alive);
+        if (others.length){
+          const tgtName = prompt('三张相同：输入目标玩家名称 (留空放弃)', others[0].name) || '';
+          const target = others.find(p=>p.name===tgtName.trim());
+          if (target) params.targetPlayerId = target.id;
+          const declare = prompt('声明你想要的普通猫牌名 (例如 BOSS_KITTEN)', cards[0].name || '')||'';
+          if (declare) params.declareCardName = declare.trim();
+        }
+      } else if (comboType==='FIVE_DISTINCT') {
+        const mode = prompt('五异取回: 输入卡牌类型(例如 ATTACK / SKIP / NORMAL) 或 留空放弃。如果输入 NORMAL 可再输入猫牌名称, 例如 BOSS_KITTEN, 以逗号分隔: NORMAL,BOSS_KITTEN','');
+        if (mode){
+          const parts = mode.split(',').map(s=>s.trim()).filter(Boolean);
+          if (parts[0]) params.declareCardType = parts[0];
+          if (parts[0]==='NORMAL' && parts[1]) params.declareNormalName = parts[1];
+        }
+      }
+      socket.emit('playCombo', { roomId, playerId, cardIds, params }, ack=>{ if(!ack.ok) log('组合失败:'+ (ack.result?.message||'')); else { log('组合成功'); selected.clear(); } });
+    };
+
+    forceResolveBtn.onclick = () => {
+      socket.emit('forceResolveNope',{ roomId }, ack=>{ if(!ack.ok) log('强制结算失败'); });
+    };
+    playNopeBtn.onclick = () => {
+      socket.emit('playNope',{ roomId, playerId }, ack=>{ if(!ack.ok) log('NOPE 失败:'+ack.message); else log('打出 NOPE'); });
+    };
+
     stateBus.on('gameState', st => {
       lastState = st;
       render(st);
+      handlePending(st);
+      handleFavor(st);
     });
+    stateBus.on('nopeResolved', data => { log('NOPE 结算: '+ JSON.stringify(data.outcome)); });
+
+    function handlePending(st){
+      if (!st.pendingNope){
+        pendingBar.style.display='none';
+        if (countdownTimer) clearInterval(countdownTimer);
+        return;
+      }
+      pendingBar.style.display='block';
+      if (countdownTimer) clearInterval(countdownTimer);
+      updatePendingText(st);
+      countdownTimer = setInterval(()=>{ updatePendingText(lastState); },200);
+      const me = st.players.find(p=>p.id===playerId);
+      const hasNope = !!me?.hand.find(c=>c.type==='NOPE');
+      playNopeBtn.style.display = hasNope ? 'inline-block':'none';
+    }
+    function updatePendingText(st){
+      if (!st?.pendingNope) return;
+      const exp = st.pendingNopeExpireAt || Date.now();
+      const remain = Math.max(0, exp - Date.now());
+      const sec = (remain/1000).toFixed(2);
+      const originName = st.players.find(p=>p.id===st.pendingNope.playerId)?.name || st.pendingNope.playerId;
+      pendingText.textContent = `待决: ${originName} 的 ${st.pendingNope.cardType} (NOPE数:${st.pendingNope.nopeCount}) 剩余 ${sec}s`;
+      updateNopeLog(st);
+      if (remain<=0 && countdownTimer){ clearInterval(countdownTimer); }
+    }
+    function updateNopeLog(st){
+      if (!st.pendingNope?.log?.length){ nopeLogEl.textContent=''; return; }
+      nopeLogEl.textContent = 'NOPE顺序: '+ st.pendingNope.log.map(l=>{
+        const nm = st.players.find(p=>p.id===l.playerId)?.name || l.playerId; return nm; }).join(' -> ');
+    }
+
+    function handleFavor(st){
+      if (!st.pendingFavor){
+        favorBar.style.display='none';
+        if (favorTimer) clearInterval(favorTimer);
+        return;
+      }
+      favorBar.style.display='block';
+      if (favorTimer) clearInterval(favorTimer);
+      favorTimer = setInterval(()=>{ updateFavorCountdown(); },200);
+      const { requesterId, targetId } = st.pendingFavor;
+      const requesterName = st.players.find(p=>p.id===requesterId)?.name || requesterId;
+      const targetName = st.players.find(p=>p.id===targetId)?.name || targetId;
+      if (targetId === playerId){
+        favorStatus.textContent = `Favor 请求: 你需要给 ${requesterName} 一张牌`;
+        buildFavorCards();
+      } else if (requesterId === playerId) {
+        favorStatus.textContent = `等待 ${targetName} 选择一张牌...`;
+        favorCards.innerHTML='';
+      } else {
+        favorStatus.textContent = `${targetName} 正在响应 Favor`; favorCards.innerHTML='';
+      }
+      updateFavorCountdown();
+    }
+    function updateFavorCountdown(){
+      if (!lastState?.pendingFavor){ favorCountdown.textContent=''; return; }
+      const exp = lastState.pendingFavorExpireAt || Date.now();
+      const remain = Math.max(0, exp - Date.now());
+      favorCountdown.textContent = `剩余 ${(remain/1000).toFixed(2)}s 自动选择`;
+      if (remain<=0 && favorTimer){ clearInterval(favorTimer); }
+    }
+    function buildFavorCards(){
+      favorCards.innerHTML='';
+      const me = lastState.players.find(p=>p.id===playerId);
+      if (!me) return;
+      me.hand.forEach(c=>{
+        const d = document.createElement('div');
+        d.className='card pickable';
+        d.textContent = c.type + (c.name?'\n'+c.name:'');
+        d.onclick = () => {
+          socket.emit('provideFavorCard', { roomId, playerId, cardId: c.id }, ack=>{ if(!ack.ok) log('提供失败'); else log('已提供牌'); });
+        };
+        favorCards.appendChild(d);
+      });
+    }
+
+    function updateComboBar(){
+      if (!selected.size){ comboBar.style.display='none'; return; }
+      comboBar.style.display='block';
+      comboInfo.textContent = `已选择 ${selected.size} 张`;
+      comboExtra.textContent = '规则: 相同2/3/4 或 5张全不同';
+    }
 
     function render(st){
+      lastState = st;
       const psWrap = document.getElementById('players');
       psWrap.innerHTML='';
       st.players.forEach((p,i)=>{
@@ -69,9 +243,28 @@
       if (me){
         me.hand.forEach(c => {
           const div = document.createElement('div');
-          div.className='card';
+          div.className='card'+(selected.has(c.id)?' sel':'');
+            div.style.border = selected.has(c.id)?'2px solid #4caf50':'1px solid #0000';
             div.textContent = c.type + (c.name?'\n'+c.name:'');
             div.onclick = () => {
+              if (c.type==='TARGETED_ATTACK' || c.type==='FAVOR') {
+                const others = st.players.filter(p=>p.id!==playerId && p.alive);
+                let extra = {};
+                if (others.length){
+                  const nameStr = others.map(o=>o.name).join(',');
+                  const tgt = prompt((c.type==='TARGETED_ATTACK'?'定向攻击':'Favor 索取')+': 输入目标玩家名称\n'+nameStr, others[0].name)||'';
+                  const found = others.find(o=>o.name===tgt.trim());
+                  if (found) extra.targetPlayerId = found.id;
+                }
+                socket.emit('playCard', { roomId, playerId, cardId: c.id, extra }, ack=>{ if(!ack.ok) log('出牌失败:'+ (ack.message||'')); else log('出牌 '+c.type); });
+                return;
+              }
+              if (c.type==='NORMAL') {
+                if (selected.has(c.id)) selected.delete(c.id); else selected.add(c.id);
+                updateComboBar();
+                render(lastState);
+                return;
+              }
               socket.emit('playCard', { roomId, playerId, cardId: c.id }, ack=>{ if(!ack.ok) log('出牌失败:'+ (ack.message||'')); else log('出牌 '+c.type); });
             };
           handEl.appendChild(div);

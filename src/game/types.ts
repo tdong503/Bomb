@@ -51,6 +51,13 @@ export interface GameOptions {
   seed?: string; // optional deterministic seed (not yet implemented)
 }
 
+export interface PendingNopeSummary {
+  cardType: CardType;
+  playerId: string; // who played the card
+  nopeCount: number;
+  log?: { playerId: string; at: number }[];
+}
+
 export interface GameStateSnapshot {
   id: string;
   createdAt: number;
@@ -63,6 +70,11 @@ export interface GameStateSnapshot {
   drawPileCount: number;
   discardTop?: Card; // show top for UI animations
   publicKnownCardsTop?: Card[]; // e.g. revealed by See Future (limited to current viewer context in real impl)
+  discardPile?: Card[]; // added for prototype UI (will leak info; production should restrict)
+  pendingNope?: PendingNopeSummary; // simplified chain summary
+  pendingFavor?: { requesterId: string; targetId: string }; // added for prototype UI (will leak info; production should restrict)
+  pendingNopeExpireAt?: number; // server scheduled resolution timestamp (ms)
+  pendingFavorExpireAt?: number; // server favor auto resolve timestamp (ms)
 }
 
 export interface InternalGameState {
@@ -85,4 +97,3 @@ export function createNormalCat(name: NormalCatName): Card {
 export function createCard(type: CardType, name?: NormalCatName): Card {
   return { id: uuid(), type, name };
 }
-

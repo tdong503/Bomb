@@ -6,9 +6,11 @@
   <style>
     body { font-family: system-ui, Arial, sans-serif; margin:1rem; background:#10141a; color:#f0f3f5; }
     .row { display:flex; gap:1rem; flex-wrap:wrap; }
-    .player { background:#1e252e; padding:.75rem; border-radius:6px; width:140px; position:relative; }
+    .player { background:#1e252e; padding:.75rem; border-radius:6px; width:160px; position:relative; }
     .player.me { outline:2px solid #2ecc71; }
-    .dead { filter:grayscale(1); opacity:.5; }
+    .player .avatar { width:60px; height:60px; border-radius:8px; overflow:hidden; background:#000; display:flex; align-items:center; justify-content:center; margin-bottom:.4rem; }
+    .player .avatar img { width:100%; height:100%; object-fit:cover; }
+    .badge { position:absolute; top:4px; right:4px; background:#ffb347; color:#222; padding:2px 6px; font-size:.6rem; border-radius:4px; }
     button { cursor:pointer; }
     #log { max-height:160px; overflow:auto; background:#0008; padding:.5rem; font-size:.8rem; }
   </style>
@@ -22,7 +24,7 @@
   </div>
   <h3>玩家</h3>
   <div class="row" id="players"></div>
-  <p>拖动（或点击目标座位按钮）可调整座位（未实现拖动，使用按钮演示）。</p>
+  <p>点击“换到此位”可调整座位（仅未开始）</p>
   <div id="log"></div>
   <script type="module" src="/client.js"></script>
   <script type="module">
@@ -36,33 +38,67 @@
     const playerId = getPlayerId();
     const name = ensureName();
 
+    let hostId = null;
+    let lastPlayers = [];
+
     function log(msg){ const el = document.getElementById('log'); el.innerHTML += `<div>${new Date().toLocaleTimeString()} ${msg}</div>`; el.scrollTop = el.scrollHeight; }
 
-    socket.emit('joinRoom', { roomId: roomParam, playerId, name }, (ack)=>{ if(!ack?.ok){ alert('加入失败:'+ack.error); location.href='/'; }});
+    socket.emit('joinRoom', { roomId: roomParam, playerId, name }, (ack)=>{ if(!ack?.ok){ alert('加入失败:'+ack.error); location.href='/'; } else { log('已加入房间'); }});
 
-    document.getElementById('startBtn').onclick = () => {
-      socket.emit('startGame', { roomId: roomParam, playerId }, (ack)=>{ if(!ack.ok) alert('无法开始'); else location.href=`/game.html?room=${roomParam}`; });
+    const startBtn = document.getElementById('startBtn');
+    startBtn.onclick = () => {
+      socket.emit('startGame', { roomId: roomParam, playerId }, (ack)=>{ if(!ack.ok) alert('无法开始 (需房主或人数不足?)'); else location.href=`/game.html?room=${roomParam}`; });
     };
     document.getElementById('leaveBtn').onclick = () => { location.href='/'; };
-    document.getElementById('copyBtn').onclick = () => { navigator.clipboard.writeText(location.href).then(()=>alert('已复制房间链接')); };
+    document.getElementById('copyBtn').onclick = () => {
+      const link = location.origin + `/lobby.html?room=${roomParam}`;
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(link).then(()=>alert('已复制房间链接: '+link)).catch(()=>fallbackCopy(link));
+      } else fallbackCopy(link);
+    };
+
+    function fallbackCopy(text){
+      const ta = document.createElement('textarea');
+      ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); alert('已复制房间链接: '+text);} catch { prompt('复制失败，请手动复制:', text); }
+      ta.remove();
+    }
 
     stateBus.on('roomUpdate', payload => {
-      renderPlayers(payload.state.players);
+      hostId = payload.hostId || hostId;
+      refreshPlayers(payload.state.players);
+      updateStartButton(payload.state);
+    });
+    stateBus.on('gameState', st => {
+      if (!hostId) hostId = st.players?.[0]?.id || hostId;
+      refreshPlayers(st.players.map(p=>({ id:p.id, name:p.name, avatar:p.avatar, alive:p.alive !== false })));
+      updateStartButton(st);
     });
 
-    function renderPlayers(players){
+    function updateStartButton(state){
+      // started flag may appear only in gameState; in roomUpdate we may check .started if present
+      const started = !!state.started;
+      const amHost = playerId === hostId;
+      startBtn.disabled = !amHost || started;
+      startBtn.textContent = started ? '游戏中' : (amHost ? '开始游戏' : '等待房主');
+    }
+
+    function refreshPlayers(players){
+      lastPlayers = players;
       const wrap = document.getElementById('players');
       wrap.innerHTML='';
       players.forEach((p,i)=>{
         const div = document.createElement('div');
         div.className='player'+(p.id===playerId?' me':'');
-        div.innerHTML = `<strong>#${i}</strong><br>${p.name}<br><small>${p.alive?'存活':'出局'}</small><br>`;
-        const btn = document.createElement('button');
-        btn.textContent='换到此位';
-        btn.onclick=()=>{
+        div.innerHTML = `
+          <div class="avatar">${p.avatar?`<img src="${p.avatar}" alt="av">`:'<span style=\'font-size:.6rem;opacity:.6;\'>无头像</span>'}</div>
+          <strong>${p.name}</strong>${p.id===hostId?' <span style="color:#ffb347;">(房主)</span>':''}<br>
+          <small>#${i}</small><br>
+          <button data-seat="${i}">换到此位</button>
+        `;
+        div.querySelector('button').onclick=()=>{
           socket.emit('swapSeat',{ roomId: roomParam, playerId, targetSeat:i }, ack=>{ if(!ack.ok) alert('无法换位'); });
         };
-        div.appendChild(btn);
         wrap.appendChild(div);
       });
     }

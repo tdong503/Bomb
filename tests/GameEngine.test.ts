@@ -63,28 +63,29 @@ describe('GameEngine core mechanics', () => {
     const game = setup(3);
     const dbg = game.getDebugState();
     const currentId = dbg.players[0].id;
-    // Give current player an ATTACK card
     const attack = createCard(CardType.ATTACK);
     (game as any).state.players[0].hand.push(attack);
     const res = game.playCard(currentId, attack.id);
-    expect(res.success).toBe(true);
+    expect(res.pending).toBe(true);
+    // resolve
+    game.resolvePendingNow();
     const after = game.getDebugState();
-    // Current player should now be index 1
     expect(after.currentPlayerIndex).toBe(1);
     const next = after.players[1];
-    expect(next.remainingTurns).toBeGreaterThan(1); // 2 turns total
+    expect(next.remainingTurns).toBeGreaterThan(1);
   });
 
-  test('skip ends turn immediately', () => {
+  test('skip ends turn after resolution', () => {
     const game = setup(3);
     const dbg = game.getDebugState();
     const currentId = dbg.players[0].id;
     const skip = createCard(CardType.SKIP);
     (game as any).state.players[0].hand.push(skip);
     const res = game.playCard(currentId, skip.id);
-    expect(res.success).toBe(true);
+    expect(res.pending).toBe(true);
+    game.resolvePendingNow();
     const after = game.getDebugState();
-    expect(after.currentPlayerIndex).toBe(1); // advanced
+    expect(after.currentPlayerIndex).toBe(1);
   });
 
   test('two of a kind steals random card', () => {
@@ -104,5 +105,88 @@ describe('GameEngine core mechanics', () => {
     const inHand = after.players[0].hand.find((c:any)=>c.id===c1.id || c.id===c2.id);
     expect(inHand).toBeUndefined();
   });
-});
 
+  test('favor interactive: pending then target provides a card', () => {
+    const n=3;
+    const game:any = createGame({ playerCount:n, useExpansion:false, includeImploding:false, seed:'s1' });
+    for (let i=0;i<n;i++) game.addPlayer('F'+i,'F'+i);
+    game.start();
+    // Ensure target (F1) has at least one extra normal card
+    (game as any).state.players[1].hand.push(createCard(CardType.NORMAL));
+    const favor = createCard(CardType.FAVOR);
+    (game as any).state.players[0].hand.push(favor);
+    const beforeTarget = (game as any).state.players[1].hand.length;
+    const beforeReq = (game as any).state.players[0].hand.length;
+    const res = game.playCard('F0', favor.id, { targetPlayerId: 'F1' });
+    expect(res.pending).toBe(true);
+    game.resolvePendingNow(); // resolves NOPE window and sets pendingFavor
+    const snapAfter = game.getDebugState();
+    expect(snapAfter.pendingFavor || (game as any).getPendingFavor?.()).toBeTruthy();
+    // Choose a specific card (first non-defuse if exists)
+    const targetHand = (game as any).state.players[1].hand;
+    const choose = targetHand.find((c:any)=>![CardType.DEFUSE,CardType.BOMB,CardType.IMPLODING].includes(c.type)) || targetHand[0];
+    const r2 = game.provideFavorCard('F1', choose.id);
+    expect(r2.success).toBe(true);
+    const after = game.getDebugState();
+    const afterTarget = after.players[1].hand.length;
+    const afterReq = after.players[0].hand.length;
+    expect(afterTarget).toBe(beforeTarget - 1);
+    // requester lost favor (-1) gained one card (+1) net same
+    expect(afterReq).toBe(beforeReq);
+  });
+
+  test('favor autoResolveFavor picks a card if timeout occurs', () => {
+    const game:any = createGame({ playerCount:3, useExpansion:false, includeImploding:false, seed:'s2' });
+    game.addPlayer('A','A'); game.addPlayer('B','B'); game.addPlayer('C','C');
+    game.start();
+    (game as any).state.players[1].hand.push(createCard(CardType.NORMAL));
+    const favor = createCard(CardType.FAVOR);
+    (game as any).state.players[0].hand.push(favor);
+    game.playCard('A', favor.id, { targetPlayerId:'B' });
+    game.resolvePendingNow();
+    const beforeAuto = game.getDebugState();
+    expect(beforeAuto.pendingFavor).toBeTruthy();
+    game.autoResolveFavor();
+    const after = game.getDebugState();
+    expect(after.pendingFavor).toBeFalsy();
+  });
+
+  test('five distinct retrieval by type & name works without exposing discard list in snapshot', () => {
+    const game:any = createGame({ playerCount:3, useExpansion:false, includeImploding:false, seed:'rt1' });
+    game.addPlayer('R0','R0'); game.addPlayer('R1','R1'); game.addPlayer('R2','R2');
+    game.start();
+    // Give player R0 five distinct normal cats
+    const names = ['BOSS_KITTEN','SLIPPER_KITTEN','BUG_KITTEN','NEZHA_KITTEN','LIGHTNING_KITTEN'] as any;
+    const cards = names.map((n:any)=> createNormalCat(n));
+    (game as any).state.players[0].hand.push(...cards);
+    // Put a target normal card in discard pile to retrieve
+    const targetCat = createNormalCat('POTATO_KITTEN' as any);
+    (game as any).state.discardPile.push(targetCat);
+    const res = game.playCombo('R0', cards.map((c:any)=>c.id), { declareCardType: CardType.NORMAL, declareNormalName: 'POTATO_KITTEN' });
+    expect(res.success).toBe(true);
+    const after = game.getDebugState();
+    const inHand = after.players[0].hand.find((c:any)=>c.id===targetCat.id);
+    expect(inHand).toBeTruthy();
+    const snap = game.getStateSnapshot();
+    expect((snap as any).discardPile).toBeUndefined(); // hidden now
+  });
+
+  test('NOPE log records sequence order', () => {
+    const game:any = createGame({ playerCount:4, useExpansion:false, includeImploding:false, seed:'s3' });
+    game.addPlayer('P0','P0'); game.addPlayer('P1','P1'); game.addPlayer('P2','P2'); game.addPlayer('P3','P3');
+    game.start();
+    const attack = createCard(CardType.ATTACK); (game as any).state.players[0].hand.push(attack);
+    const n1 = createCard(CardType.NOPE); (game as any).state.players[1].hand.push(n1);
+    const n2 = createCard(CardType.NOPE); (game as any).state.players[2].hand.push(n2);
+    const n3 = createCard(CardType.NOPE); (game as any).state.players[3].hand.push(n3);
+    game.playCard('P0', attack.id);
+    game.playNope('P1');
+    game.playNope('P2');
+    game.playNope('P3');
+    const snap = game.getStateSnapshot();
+    expect(snap.pendingNope?.log?.map((l: any)=>l.playerId)).toEqual(['P1','P2','P3']);
+    game.resolvePendingNow(); // odd number 3 -> canceled
+    const after = game.getDebugState();
+    expect(after.currentPlayerIndex).toBe(0); // turn not advanced due to canceled attack
+  });
+});
