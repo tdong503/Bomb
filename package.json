@@ -1,0 +1,15 @@
+{
+  "name": "bomb-monorepo",
+  "private": true,
+  "workspaces": ["server", "client"],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "npm run dev -w server & npm run dev -w client",
+    "build": "npm run build -w client && npm run build -w server",
+    "start": "npm run build -w client && npm run build -w server && npm run start -w server",
+    "test:engine": "npm run test:engine -w server"
+  }
+}
+
