@@ -72,17 +72,11 @@ export const RoomView: React.FC<Props> = ({ room, you, hand, onStart, onDraw, on
   return (
     <div className="room-layout">
       <div className="left-panel">
-        <h2>房间 {room.roomId}</h2>
         <PlayerList room={room} youId={you?.id} />
-        <div className="room-info">
-          <div>牌堆剩余: {room.deckCount}</div>
-            <div>方向: {room.direction === 1 ? '顺时针' : '逆时针'}</div>
-          {room.turnPlayerId && !winner && <div>当前回合: {room.players.find(p => p.id === room.turnPlayerId)?.nickname}</div>}
-          {winner && <div className="winner-banner">胜利者: {winner.nickname}</div>}
-        </div>
         {!room.started && isOwner && (
           <button className="primary" onClick={onStart}>开始游戏</button>
         )}
+        <br />
         {room.started && !winner && (
           <div className="turn-actions column">
             <div className="row gap">
