@@ -44,16 +44,15 @@ export const App: React.FC = () => {
         };
     }, []);
 
-    const createRoom = useCallback((nickname: string) => {
+    const createRoom = useCallback((nickname: string, avatar: string) => {
         const socket = getSocket();
-        socket.emit('room:create', {nickname}, (res: any) => {
+        socket.emit('room:create', { nickname, avatar }, (res: any) => {
             if (!res.ok) setError(res.error || 'create failed');
         });
     }, []);
-
-    const joinRoom = useCallback((roomId: string, nickname: string) => {
+    const joinRoom = useCallback((roomId: string, nickname: string, avatar: string) => {
         const socket = getSocket();
-        socket.emit('room:join', {roomId, nickname}, (res: any) => {
+        socket.emit('room:join', { roomId, nickname, avatar }, (res: any) => {
             if (!res.ok) setError(res.error || 'join failed');
         });
     }, []);

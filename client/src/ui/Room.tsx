@@ -71,10 +71,10 @@ export const RoomView: React.FC<Props> = ({ room, you, hand, onStart, onDraw, on
 
   return (
     <div className="room-layout">
-      <div className="left-panel">
+      <div className="top-panel">
         <PlayerList room={room} youId={you?.id} />
         {!room.started && isOwner && (
-          <button className="primary" onClick={onStart}>开始游戏</button>
+          <button className="primary btn-small" onClick={onStart}>开始游戏</button>
         )}
         <br />
         {room.started && !winner && (
